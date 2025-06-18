@@ -55,6 +55,7 @@ interface ProjectData {
 let mongoClient: MongoClient | null = null;              // MongoDB客户端连接
 let projectsCollection: Collection | null = null;        // 项目集合引用
 
+
 /**
  * 连接到MongoDB
  * 直接使用环境变量中的MONGO_URL连接到数据库
@@ -82,7 +83,7 @@ async function connectToMongoDB(): Promise<boolean> {
         projectsCollection = db.collection('projects');
 
         // 测试连接
-        await db.command({ ping: 1 });
+        await db.command({ping: 1});
         fastify.log.info('MongoDB连接成功!');
 
         return true;
@@ -97,18 +98,18 @@ async function connectToMongoDB(): Promise<boolean> {
  * @param {string} packageName - 项目的唯一标识符
  * @returns {Promise<ProjectData|null>} 项目数据或null
  */
-async function getProject(packageName: string): Promise<ProjectData|null> {
+async function getProject(packageName: string): Promise<ProjectData | null> {
     try {
         if (!projectsCollection) {
             fastify.log.warn('MongoDB未连接，无法获取项目');
             return null;
         }
 
-        const doc = await projectsCollection.findOne({ packageName });
+        const doc = await projectsCollection.findOne({packageName});
         if (!doc) return null;
 
         // 移除_id字段
-        const { _id, ...projectData } = doc;
+        const {_id, ...projectData} = doc;
         return projectData;
     } catch (error) {
         fastify.log.error(`获取项目失败:`, error);
@@ -131,7 +132,7 @@ async function getAllProjects(): Promise<Record<string, ProjectData>> {
         const projects: Record<string, ProjectData> = {};
 
         documents.forEach(doc => {
-            const { packageName, _id, ...projectData } = doc;
+            const {packageName, _id, ...projectData} = doc;
             if (packageName) {
                 projects[packageName] = projectData;
             }
