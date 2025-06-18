@@ -33,7 +33,7 @@ interface Projects {
   [key: string]: ProjectData;
 }
 
-// MongoDB配置
+// MongoDB配置 - 使用正确的配置
 const dbName = 'projectsDB';
 const collectionName = 'projects';
 let mongoClient: MongoClient | null = null;
@@ -42,29 +42,46 @@ let projectsCollection: Collection | null = null;
 // 缓存的项目数据
 let projects: Projects = {};
 
-// 从Railway环境变量获取MongoDB连接URL
+// 从Railway环境变量获取MongoDB连接URL - 优先使用内部连接
 function getMongoConnectionUrl(): string {
+  // 优先使用内部连接以避免出口费用
+  const host = process.env.MONGOHOST || 'mongodb.railway.internal';
+  const port = process.env.MONGOPORT || '27017';
+  const user = process.env.MONGOUSER || 'mongo';
+  const password = process.env.MONGOPASSWORD;
+
+  if (host && port && user && password) {
+    // 构建安全的内部连接URL
+    return `mongodb://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}`;
+  }
+
+  // 回退到MONGO_URL（如果可用）
   if (process.env.MONGO_URL) {
     return process.env.MONGO_URL;
   }
 
-  const user = process.env.MONGOUSER || 'mongo';
-  const password = process.env.MONGOPASSWORD;
-  const host = process.env.MONGOHOST || 'mongodb.railway.internal';
-  const port = process.env.MONGOPORT || '27017';
-
-  return `mongodb://${user}:${password}@${host}:${port}`;
+  throw new Error('无法获取有效的MongoDB连接信息');
 }
 
 // 初始化MongoDB连接
 async function initMongoDB() {
   try {
     const url = getMongoConnectionUrl();
-    mongoClient = new MongoClient(url);
+    fastify.log.info(`正在连接到MongoDB...`);
+
+    mongoClient = new MongoClient(url, {
+      connectTimeoutMS: 5000,
+      socketTimeoutMS: 30000
+    });
+
     await mongoClient.connect();
 
     const db = mongoClient.db(dbName);
     projectsCollection = db.collection(collectionName);
+
+    // 测试连接
+    await db.command({ ping: 1 });
+    fastify.log.info('MongoDB连接成功');
 
     // 加载项目数据
     const documents = await projectsCollection.find({}).toArray();
@@ -76,26 +93,29 @@ async function initMongoDB() {
       }
     });
 
-    fastify.log.info('MongoDB连接成功，已加载项目数据');
+    fastify.log.info(`已加载 ${Object.keys(projects).length} 个项目`);
     return true;
   } catch (error) {
     fastify.log.error('MongoDB连接或数据加载失败:', error);
-    return false;
+    process.exit(1); // 如果数据库连接失败，直接退出应用
   }
 }
 
 // 保存项目到MongoDB
 async function saveProject(packageName: string, data: ProjectData) {
   try {
-    if (projectsCollection) {
-      await projectsCollection.updateOne(
-          { packageName },
-          { $set: { packageName, ...data } },
-          { upsert: true }
-      );
-      return true;
+    if (!projectsCollection) {
+      throw new Error('MongoDB集合未初始化');
     }
-    return false;
+
+    await projectsCollection.updateOne(
+        { packageName },
+        { $set: { packageName, ...data } },
+        { upsert: true }
+    );
+
+    fastify.log.info(`项目 ${packageName} 已保存`);
+    return true;
   } catch (error) {
     fastify.log.error(`保存项目失败: ${error}`);
     return false;
@@ -108,12 +128,17 @@ async function isIPFromBrazil(ip: string | null): Promise<boolean> {
 
   try {
     const response = await axios.get(
-        `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`
+        `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
+        { timeout: 5000 } // 添加超时
     );
-    fastify.log.debug("IP info: " + response.data.countryCode);
-    return response.data.countryCode === "BR";
+
+    if (response.data && response.data.countryCode) {
+      fastify.log.debug(`IP ${ip} 的国家代码: ${response.data.countryCode}`);
+      return response.data.countryCode === "BR";
+    }
+    return false;
   } catch (error) {
-    fastify.log.error("Error fetching IP info:", error);
+    fastify.log.error(`检查IP地理位置失败 (${ip}):`, error);
     return false;
   }
 }
@@ -123,12 +148,17 @@ async function isAccessibleRegion(ip: string | null, countryCode?: string): Prom
 
   try {
     const response = await axios.get(
-        `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`
+        `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
+        { timeout: 5000 } // 添加超时
     );
-    fastify.log.debug("IP info: " + response.data.countryCode);
-    return response.data.countryCode === countryCode;
+
+    if (response.data && response.data.countryCode) {
+      fastify.log.debug(`IP ${ip} 的国家代码: ${response.data.countryCode}`);
+      return response.data.countryCode === countryCode;
+    }
+    return false;
   } catch (error) {
-    fastify.log.error("Error fetching IP info:", error);
+    fastify.log.error(`检查IP地理位置失败 (${ip}):`, error);
     return false;
   }
 }
@@ -216,9 +246,18 @@ fastify.post("/p/update/:key", async (request: FastifyRequest<{
   projects[key] = data;
 
   // 保存到MongoDB
-  await saveProject(key, data);
+  const success = await saveProject(key, data);
 
-  return reply.status(200).send("{}");
+  if (success) {
+    return reply.status(200).send("{}");
+  } else {
+    return reply.status(500).send({ error: "Failed to save project" });
+  }
+});
+
+// 添加健康检查端点
+fastify.get('/health', async () => {
+  return { status: 'ok', mongoConnected: !!mongoClient };
 });
 
 // 启动服务器前初始化MongoDB
@@ -233,6 +272,7 @@ const start = async () => {
       port: Number(process.env.PORT) || 3000
     });
 
+    fastify.log.info(`服务器已启动，监听端口: ${process.env.PORT || 3000}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -244,14 +284,22 @@ start();
 
 // 优雅退出
 process.on('SIGINT', async () => {
+  fastify.log.info('收到SIGINT信号，正在关闭...');
   await fastify.close();
-  if (mongoClient) await mongoClient.close();
+  if (mongoClient) {
+    await mongoClient.close();
+    fastify.log.info('MongoDB连接已关闭');
+  }
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
+  fastify.log.info('收到SIGTERM信号，正在关闭...');
   await fastify.close();
-  if (mongoClient) await mongoClient.close();
+  if (mongoClient) {
+    await mongoClient.close();
+    fastify.log.info('MongoDB连接已关闭');
+  }
   process.exit(0);
 });
 
