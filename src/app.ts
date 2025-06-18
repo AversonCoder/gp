@@ -45,14 +45,8 @@ fastify.register(AutoLoad, {
 interface ProjectData {
     code?: string;        // 项目代码，"1"=隐藏，"2"=显示
     ip?: string;          // 限制访问的国家代码
+    packageName?: string; // 包名标识
     [key: string]: any;   // 其他自定义字段
-}
-
-/**
- * 项目映射类型，键是packageName
- */
-interface Projects {
-    [key: string]: ProjectData;
 }
 
 /**
@@ -60,10 +54,9 @@ interface Projects {
  */
 let mongoClient: MongoClient | null = null;              // MongoDB客户端连接
 let projectsCollection: Collection | null = null;        // 项目集合引用
-let projects: Projects = {};                             // 内存中缓存的项目数据
 
 /**
- * 连接到MongoDB并加载项目数据
+ * 连接到MongoDB
  * 尝试使用环境变量中的MongoDB连接信息，优先使用MONGO_URL
  * @returns {Promise<boolean>} 连接是否成功
  */
@@ -93,26 +86,67 @@ async function connectToMongoDB(): Promise<boolean> {
         const db = mongoClient.db('projectsDB');
         projectsCollection = db.collection('projects');
 
-        fastify.log.info('MongoDB连接成功，正在加载数据...');
+        // 测试连接
+        await db.command({ ping: 1 });
+        fastify.log.info('MongoDB连接成功');
 
-        // 从数据库加载所有项目
-        const documents = await projectsCollection.find({}).toArray();
-        projects = {};
-
-        // 处理查询结果，提取项目数据
-        documents.forEach(doc => {
-            const {packageName, _id, ...projectData} = doc;
-            if (packageName) {
-                projects[packageName] = projectData;
-            }
-        });
-
-        fastify.log.info(`已加载 ${Object.keys(projects).length} 个项目`);
         return true;
     } catch (error) {
         // 记录错误但不终止应用
         fastify.log.error('MongoDB连接失败:', error);
         return false;
+    }
+}
+
+/**
+ * 根据packageName获取项目数据
+ * @param {string} packageName - 项目的唯一标识符
+ * @returns {Promise<ProjectData|null>} 项目数据或null
+ */
+async function getProject(packageName: string): Promise<ProjectData|null> {
+    try {
+        if (!projectsCollection) {
+            fastify.log.warn('MongoDB未连接，无法获取项目');
+            return null;
+        }
+
+        const doc = await projectsCollection.findOne({ packageName });
+        if (!doc) return null;
+
+        // 移除_id字段
+        const { _id, ...projectData } = doc;
+        return projectData;
+    } catch (error) {
+        fastify.log.error(`获取项目失败:`, error);
+        return null;
+    }
+}
+
+/**
+ * 获取所有项目数据
+ * @returns {Promise<Record<string, ProjectData>>} 所有项目数据，以packageName为键
+ */
+async function getAllProjects(): Promise<Record<string, ProjectData>> {
+    try {
+        if (!projectsCollection) {
+            fastify.log.warn('MongoDB未连接，无法获取项目');
+            return {};
+        }
+
+        const documents = await projectsCollection.find({}).toArray();
+        const projects: Record<string, ProjectData> = {};
+
+        documents.forEach(doc => {
+            const { packageName, _id, ...projectData } = doc;
+            if (packageName) {
+                projects[packageName] = projectData;
+            }
+        });
+
+        return projects;
+    } catch (error) {
+        fastify.log.error(`获取所有项目失败:`, error);
+        return {};
     }
 }
 
@@ -124,7 +158,6 @@ async function connectToMongoDB(): Promise<boolean> {
  */
 async function saveProject(packageName: string, data: ProjectData): Promise<boolean> {
     try {
-        // 检查MongoDB连接是否可用
         if (!projectsCollection) {
             fastify.log.warn('MongoDB未连接，无法保存项目');
             return false;
@@ -201,7 +234,7 @@ async function isAccessibleRegion(ip: string | null, countryCode?: string): Prom
  * API端点：获取所有项目数据
  */
 fastify.get("/p/all", async (request: FastifyRequest, reply: FastifyReply) => {
-    return projects;
+    return await getAllProjects();
 });
 
 /**
@@ -211,7 +244,7 @@ fastify.get("/pp/:key", async (request: FastifyRequest<{
     Params: { key: string }
 }>, reply: FastifyReply) => {
     const key = request.params.key;
-    const projectData = projects[key];
+    const projectData = await getProject(key);
 
     if (projectData) {
         return projectData;
@@ -231,7 +264,7 @@ fastify.get("/br/:key", async (request: FastifyRequest<{
     const xForwardedFor = request.headers["x-forwarded-for"] as string | undefined;
     const requestIp = xForwardedFor ? xForwardedFor.split(",")[0].trim() : null;
     const key = request.params.key;
-    const projectData = projects[key];
+    const projectData = await getProject(key);
 
     // 如果项目不存在，返回空对象
     if (!projectData) {
@@ -286,17 +319,14 @@ fastify.post("/p/update/:key", async (request: FastifyRequest<{
     const data = request.body;
     const key = request.params.key;
 
-    // 首先更新内存缓存
-    projects[key] = data;
-
-    // 然后尝试保存到MongoDB
+    // 保存到MongoDB
     const success = await saveProject(key, data);
     if (!success) {
-        fastify.log.warn(`项目 ${key} 已存储在内存中，但未能保存到MongoDB`);
+        fastify.log.warn(`项目 ${key} 保存失败`);
+        // 如果保存失败，仍然返回成功码，但记录日志
     }
 
-    // 无论MongoDB保存是否成功，都返回成功响应
-    // 这确保了即使MongoDB暂时不可用，API仍能正常工作
+    // 返回成功响应
     return reply.status(200).send("{}");
 });
 
@@ -306,12 +336,16 @@ fastify.post("/p/update/:key", async (request: FastifyRequest<{
  */
 fastify.get('/health', async () => {
     let dbStatus = 'disconnected';
+    let projectCount = 0;
 
     if (mongoClient && projectsCollection) {
         try {
             // 从MongoDB获取一个随机文档来验证连接
             const result = await projectsCollection.aggregate([{$sample: {size: 1}}]).toArray();
             dbStatus = result.length > 0 ? 'connected' : 'empty';
+
+            // 获取项目计数
+            projectCount = await projectsCollection.countDocuments();
         } catch (error) {
             dbStatus = 'error';
         }
@@ -320,7 +354,7 @@ fastify.get('/health', async () => {
     return {
         status: 'ok',
         mongodb: dbStatus,
-        projectCount: Object.keys(projects).length,
+        projectCount,
         timestamp: new Date().toISOString()
     };
 });
@@ -334,7 +368,7 @@ const start = async () => {
         // 尝试连接数据库，但即使失败也继续启动服务器
         const connected = await connectToMongoDB();
         if (!connected) {
-            fastify.log.warn('MongoDB连接失败，服务将继续以有限功能运行');
+            fastify.log.warn('MongoDB连接失败，服务将继续运行但功能受限');
         }
 
         // 启动HTTP服务器
