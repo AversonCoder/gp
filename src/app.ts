@@ -48,6 +48,7 @@ interface ProjectData {
     packageName?: string; // 包名标识
     [key: string]: any;   // 其他自定义字段
 }
+
 /**
  * MongoDB相关变量
  */
@@ -56,39 +57,31 @@ let projectsCollection: Collection | null = null;        // 项目集合引用
 
 /**
  * 连接到MongoDB
- * 使用环境变量中的配置信息连接到数据库
+ * 直接使用环境变量中的MONGO_URL连接到数据库
  */
 async function connectToMongoDB(): Promise<boolean> {
     try {
-        // 尝试使用MONGO_URI环境变量(推荐方式)
-        let uri = process.env.MONGO_URI || process.env.MONGO_URL;
+        // 直接使用MONGO_URL，不再尝试构建连接字符串
+        const uri = process.env.MONGO_URL;
 
-        // 如果未设置URI，尝试构建连接字符串
         if (!uri) {
-            const user = process.env.MONGOUSER || 'mongo';
-            const password = process.env.MONGOPASSWORD || '';
-            const host = process.env.MONGOHOST || 'mongodb.railway.internal';
-            const port = process.env.MONGOPORT || '27017';
-
-            uri = `mongodb://${user}:${password}@${host}:${port}/?authSource=admin`;
-            fastify.log.info(`使用构建的MongoDB连接URI: ${host}:${port}`);
+            fastify.log.error('未设置MONGO_URL环境变量');
+            return false;
         }
 
-        // 获取数据库和集合名称(如果未设置则使用默认值)
-        const dbName = process.env.DATABASE_NAME || 'projectsDB';
-        const collectionName = process.env.COLLECTION_NAME || 'projects';
+        fastify.log.info('正在连接MongoDB...');
 
-        fastify.log.info(`正在连接MongoDB(${dbName}.${collectionName})...`);
-
-        // 创建新的MongoDB客户端并连接
+        // 创建MongoDB客户端
         mongoClient = new MongoClient(uri);
+
+        // 连接到MongoDB
         await mongoClient.connect();
 
         // 选择数据库和集合
-        const db = mongoClient.db(dbName);
-        projectsCollection = db.collection(collectionName);
+        const db = mongoClient.db('projectsDB');
+        projectsCollection = db.collection('projects');
 
-        // 测试连接是否成功
+        // 测试连接
         await db.command({ ping: 1 });
         fastify.log.info('MongoDB连接成功!');
 
