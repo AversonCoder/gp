@@ -48,7 +48,6 @@ interface ProjectData {
     packageName?: string; // 包名标识
     [key: string]: any;   // 其他自定义字段
 }
-
 /**
  * MongoDB相关变量
  */
@@ -57,42 +56,44 @@ let projectsCollection: Collection | null = null;        // 项目集合引用
 
 /**
  * 连接到MongoDB
- * 尝试使用环境变量中的MongoDB连接信息，优先使用MONGO_URL
- * @returns {Promise<boolean>} 连接是否成功
+ * 使用环境变量中的配置信息连接到数据库
  */
 async function connectToMongoDB(): Promise<boolean> {
     try {
-        // 获取MongoDB连接URI
-        let uri = process.env.MONGO_URL;
+        // 尝试使用MONGO_URI环境变量(推荐方式)
+        let uri = process.env.MONGO_URI || process.env.MONGO_URL;
 
-        // 如果没有MONGO_URL，则从各组件构建连接字符串
+        // 如果未设置URI，尝试构建连接字符串
         if (!uri) {
             const user = process.env.MONGOUSER || 'mongo';
-            const password = process.env.MONGOPASSWORD;
+            const password = process.env.MONGOPASSWORD || '';
             const host = process.env.MONGOHOST || 'mongodb.railway.internal';
             const port = process.env.MONGOPORT || '27017';
 
-            // 包含authSource=admin以确保正确的身份验证数据库
             uri = `mongodb://${user}:${password}@${host}:${port}/?authSource=admin`;
+            fastify.log.info(`使用构建的MongoDB连接URI: ${host}:${port}`);
         }
 
-        fastify.log.info('正在连接MongoDB...');
+        // 获取数据库和集合名称(如果未设置则使用默认值)
+        const dbName = process.env.DATABASE_NAME || 'projectsDB';
+        const collectionName = process.env.COLLECTION_NAME || 'projects';
 
-        // 创建MongoDB客户端并连接
+        fastify.log.info(`正在连接MongoDB(${dbName}.${collectionName})...`);
+
+        // 创建新的MongoDB客户端并连接
         mongoClient = new MongoClient(uri);
         await mongoClient.connect();
 
         // 选择数据库和集合
-        const db = mongoClient.db('projectsDB');
-        projectsCollection = db.collection('projects');
+        const db = mongoClient.db(dbName);
+        projectsCollection = db.collection(collectionName);
 
-        // 测试连接
+        // 测试连接是否成功
         await db.command({ ping: 1 });
-        fastify.log.info('MongoDB连接成功');
+        fastify.log.info('MongoDB连接成功!');
 
         return true;
     } catch (error) {
-        // 记录错误但不终止应用
         fastify.log.error('MongoDB连接失败:', error);
         return false;
     }
