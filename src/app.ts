@@ -1,297 +1,378 @@
+/**
+ * MongoDB与Fastify集成应用
+ * 这个应用提供项目数据的存储和检索功能，具有区域检测特性
+ */
+
 import Fastify, {FastifyReply, FastifyRequest} from 'fastify';
-import AutoLoad, { AutoloadPluginOptions } from '@fastify/autoload';
+import AutoLoad, {AutoloadPluginOptions} from '@fastify/autoload';
 import path from 'path';
 import axios from "axios";
-import { MongoClient, Collection } from 'mongodb';
+import {Collection, MongoClient} from 'mongodb';
 
+/**
+ * 创建Fastify实例，启用日志记录
+ */
 const fastify = Fastify({
-  logger: true
+    logger: true
 });
 
-const pluginOptions: Partial<AutoloadPluginOptions> = {
-  // Place your custom options the autoload plugin below here.
-}
+/**
+ * 自动加载插件配置
+ */
+const pluginOptions: Partial<AutoloadPluginOptions> = {}
 
+/**
+ * 注册plugins目录下的所有插件
+ */
 fastify.register(AutoLoad, {
-  dir: path.join(__dirname, 'plugins'),
-  options: pluginOptions
+    dir: path.join(__dirname, 'plugins'),
+    options: pluginOptions
 });
 
+/**
+ * 注册routes目录下的所有路由
+ */
 fastify.register(AutoLoad, {
-  dir: path.join(__dirname, 'routes'),
-  options: pluginOptions
+    dir: path.join(__dirname, 'routes'),
+    options: pluginOptions
 });
 
-// 定义项目数据接口
+/**
+ * 项目数据接口定义
+ * code: 项目代码，决定项目是否可见
+ * ip: 限制访问的国家代码
+ */
 interface ProjectData {
-  code?: string;
-  ip?: string;
-  [key: string]: any;
+    code?: string;        // 项目代码，"1"=隐藏，"2"=显示
+    ip?: string;          // 限制访问的国家代码
+    [key: string]: any;   // 其他自定义字段
 }
 
+/**
+ * 项目映射类型，键是packageName
+ */
 interface Projects {
-  [key: string]: ProjectData;
+    [key: string]: ProjectData;
 }
 
-// MongoDB配置
-let mongoClient: MongoClient | null = null;
-let projectsCollection: Collection | null = null;
+/**
+ * MongoDB相关变量
+ */
+let mongoClient: MongoClient | null = null;              // MongoDB客户端连接
+let projectsCollection: Collection | null = null;        // 项目集合引用
+let projects: Projects = {};                             // 内存中缓存的项目数据
 
-// 缓存的项目数据
-let projects: Projects = {};
-
-// 连接到MongoDB并加载数据
-async function connectToMongoDB() {
-  try {
-    // 尝试使用MONGO_URL (完整URI)
-    let uri = process.env.MONGO_URL;
-
-    // 如果没有完整URI，则从组件构建
-    if (!uri) {
-      const user = process.env.MONGOUSER || 'mongo';
-      const password = process.env.MONGOPASSWORD;
-      const host = process.env.MONGOHOST || 'mongodb.railway.internal';
-      const port = process.env.MONGOPORT || '27017';
-
-      uri = `mongodb://${user}:${password}@${host}:${port}/?authSource=admin`;
-    }
-
-    fastify.log.info('正在连接MongoDB...');
-    mongoClient = new MongoClient(uri);
-    await mongoClient.connect();
-
-    // 设置集合
-    const db = mongoClient.db('projectsDB'); // 您可以考虑使用环境变量来配置
-    projectsCollection = db.collection('projects');
-
-    fastify.log.info('MongoDB连接成功，正在加载数据...');
-
-    // 加载项目数据
-    const documents = await projectsCollection.find({}).toArray();
-    projects = {};
-    documents.forEach(doc => {
-      const { packageName, _id, ...projectData } = doc;
-      if (packageName) {
-        projects[packageName] = projectData;
-      }
-    });
-
-    fastify.log.info(`已加载 ${Object.keys(projects).length} 个项目`);
-    return true;
-  } catch (error) {
-    fastify.log.error('MongoDB连接失败:', error);
-    return false;
-  }
-}
-
-// 保存项目
-async function saveProject(packageName: string, data: ProjectData) {
-  try {
-    if (!projectsCollection) {
-      fastify.log.warn('MongoDB未连接，无法保存项目');
-      return false;
-    }
-
-    await projectsCollection.updateOne(
-        { packageName },
-        { $set: { packageName, ...data } },
-        { upsert: true }
-    );
-
-    return true;
-  } catch (error) {
-    fastify.log.error(`保存项目失败:`, error);
-    return false;
-  }
-}
-
-// 检查IP是否来自巴西的函数
-async function isIPFromBrazil(ip: string | null): Promise<boolean> {
-  if (!ip) return false;
-
-  try {
-    const response = await axios.get(
-        `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
-        { timeout: 5000 }
-    );
-
-    if (response.data && response.data.countryCode) {
-      return response.data.countryCode === "BR";
-    }
-    return false;
-  } catch (error) {
-    fastify.log.error(`检查IP地理位置失败:`, error);
-    return false;
-  }
-}
-
-async function isAccessibleRegion(ip: string | null, countryCode?: string): Promise<boolean> {
-  if (!ip || !countryCode) return false;
-
-  try {
-    const response = await axios.get(
-        `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
-        { timeout: 5000 }
-    );
-
-    if (response.data && response.data.countryCode) {
-      return response.data.countryCode === countryCode;
-    }
-    return false;
-  } catch (error) {
-    fastify.log.error(`检查IP地理位置失败:`, error);
-    return false;
-  }
-}
-
-// 列出所有项目的接口
-fastify.get("/p/all", async (request: FastifyRequest, reply: FastifyReply) => {
-  return projects;
-});
-
-// 根据 key 检索项目的接口
-fastify.get("/pp/:key", async (request: FastifyRequest<{
-  Params: { key: string }
-}>, reply: FastifyReply) => {
-  const key = request.params.key;
-  const projectData = projects[key];
-
-  if (projectData) {
-    return projectData;
-  } else {
-    reply.status(404).send({ error: "Project not found" });
-  }
-});
-
-// 根据 IP 和 key 检索项目的接口
-fastify.get("/br/:key", async (request: FastifyRequest<{
-  Params: { key: string }
-}>, reply: FastifyReply) => {
-  const xForwardedFor = request.headers["x-forwarded-for"] as string | undefined;
-  const requestIp = xForwardedFor ? xForwardedFor.split(",")[0].trim() : null;
-  const key = request.params.key;
-  const projectData = projects[key];
-
-  // 如果 projectData 不存在，提前返回
-  if (!projectData) {
-    return {};
-  }
-
-  // 检查是否有 IP 字段
-  if ("ip" in projectData) {
-    // 空字符不检查
-    if (projectData.ip === "") {
-      if (projectData && projectData.code === "2") {
-        return projectData;
-      } else {
-        return {};
-      }
-    } else {
-      const accessible = await isAccessibleRegion(requestIp, projectData.ip);
-      if(accessible) {
-        if (projectData && projectData.code === "2") {
-          return projectData;
-        } else {
-          return {};
-        }
-      } else {
-        return {};
-      }
-    }
-  } else {
-    // 没有 IP 字段时，检查巴西 IP
-    const fromBrazil = await isIPFromBrazil(requestIp);
-    if (fromBrazil) {
-      if (projectData && projectData.code === "2") {
-        return projectData;
-      } else {
-        return {};
-      }
-    } else if (projectData.code === "1") {
-      return {};
-    }
-    return {};
-  }
-});
-
-// 更新项目的接口
-fastify.post("/p/update/:key", async (request: FastifyRequest<{
-  Params: { key: string },
-  Body: ProjectData
-}>, reply: FastifyReply) => {
-  const data = request.body;
-  const key = request.params.key;
-
-  // 更新内存缓存
-  projects[key] = data;
-
-  // 保存到MongoDB - 修复了TS6133错误
-  await saveProject(key, data);  // 移除了未使用的success变量
-
-  // 即使MongoDB保存失败，我们也返回成功
-  return reply.status(200).send("{}");
-});
-
-// 健康检查
-fastify.get('/health', async () => {
-  let dbStatus = 'disconnected';
-
-  if (mongoClient && projectsCollection) {
+/**
+ * 连接到MongoDB并加载项目数据
+ * 尝试使用环境变量中的MongoDB连接信息，优先使用MONGO_URL
+ * @returns {Promise<boolean>} 连接是否成功
+ */
+async function connectToMongoDB(): Promise<boolean> {
     try {
-      // 获取随机文档
-      const result = await projectsCollection.aggregate([{ $sample: { size: 1 } }]).toArray();
-      dbStatus = result.length > 0 ? 'connected' : 'empty';
-    } catch (error) {
-      dbStatus = 'error';
-    }
-  }
+        // 获取MongoDB连接URI
+        let uri = process.env.MONGO_URL;
 
-  return {
-    status: 'ok',
-    mongodb: dbStatus,
-    projectCount: Object.keys(projects).length
-  };
+        // 如果没有MONGO_URL，则从各组件构建连接字符串
+        if (!uri) {
+            const user = process.env.MONGOUSER || 'mongo';
+            const password = process.env.MONGOPASSWORD;
+            const host = process.env.MONGOHOST || 'mongodb.railway.internal';
+            const port = process.env.MONGOPORT || '27017';
+
+            // 包含authSource=admin以确保正确的身份验证数据库
+            uri = `mongodb://${user}:${password}@${host}:${port}/?authSource=admin`;
+        }
+
+        fastify.log.info('正在连接MongoDB...');
+
+        // 创建MongoDB客户端并连接
+        mongoClient = new MongoClient(uri);
+        await mongoClient.connect();
+
+        // 选择数据库和集合
+        const db = mongoClient.db('projectsDB');
+        projectsCollection = db.collection('projects');
+
+        fastify.log.info('MongoDB连接成功，正在加载数据...');
+
+        // 从数据库加载所有项目
+        const documents = await projectsCollection.find({}).toArray();
+        projects = {};
+
+        // 处理查询结果，提取项目数据
+        documents.forEach(doc => {
+            const {packageName, _id, ...projectData} = doc;
+            if (packageName) {
+                projects[packageName] = projectData;
+            }
+        });
+
+        fastify.log.info(`已加载 ${Object.keys(projects).length} 个项目`);
+        return true;
+    } catch (error) {
+        // 记录错误但不终止应用
+        fastify.log.error('MongoDB连接失败:', error);
+        return false;
+    }
+}
+
+/**
+ * 将项目数据保存到MongoDB
+ * @param {string} packageName - 项目的唯一标识符
+ * @param {ProjectData} data - 要保存的项目数据
+ * @returns {Promise<boolean>} 操作是否成功
+ */
+async function saveProject(packageName: string, data: ProjectData): Promise<boolean> {
+    try {
+        // 检查MongoDB连接是否可用
+        if (!projectsCollection) {
+            fastify.log.warn('MongoDB未连接，无法保存项目');
+            return false;
+        }
+
+        // 使用upsert确保如果记录不存在则创建
+        await projectsCollection.updateOne(
+            {packageName},
+            {$set: {packageName, ...data}},
+            {upsert: true}
+        );
+
+        return true;
+    } catch (error) {
+        fastify.log.error(`保存项目失败:`, error);
+        return false;
+    }
+}
+
+/**
+ * 检查IP是否来自巴西
+ * @param {string|null} ip - 要检查的IP地址
+ * @returns {Promise<boolean>} 是否来自巴西
+ */
+async function isIPFromBrazil(ip: string | null): Promise<boolean> {
+    if (!ip) return false;
+
+    try {
+        // 使用IP-API服务检查IP地理位置
+        const response = await axios.get(
+            `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
+            {timeout: 5000} // 设置超时避免长时间等待
+        );
+
+        // 检查返回的国家代码是否为巴西(BR)
+        if (response.data && response.data.countryCode) {
+            return response.data.countryCode === "BR";
+        }
+        return false;
+    } catch (error) {
+        fastify.log.error(`检查IP地理位置失败:`, error);
+        return false;
+    }
+}
+
+/**
+ * 检查IP是否来自指定国家
+ * @param {string|null} ip - 要检查的IP地址
+ * @param {string|undefined} countryCode - 目标国家代码
+ * @returns {Promise<boolean>} 是否来自指定国家
+ */
+async function isAccessibleRegion(ip: string | null, countryCode?: string): Promise<boolean> {
+    if (!ip || !countryCode) return false;
+
+    try {
+        // 使用IP-API服务检查IP地理位置
+        const response = await axios.get(
+            `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
+            {timeout: 5000}
+        );
+
+        // 检查返回的国家代码是否匹配
+        if (response.data && response.data.countryCode) {
+            return response.data.countryCode === countryCode;
+        }
+        return false;
+    } catch (error) {
+        fastify.log.error(`检查IP地理位置失败:`, error);
+        return false;
+    }
+}
+
+/**
+ * API端点：获取所有项目数据
+ */
+fastify.get("/p/all", async (request: FastifyRequest, reply: FastifyReply) => {
+    return projects;
 });
 
-// 启动服务器
-const start = async () => {
-  try {
-    // 尝试连接数据库，但不阻止服务器启动
-    const connected = await connectToMongoDB();
-    if (!connected) {
-      fastify.log.warn('MongoDB连接失败，服务将继续以有限功能运行');
+/**
+ * API端点：根据键名获取特定项目
+ */
+fastify.get("/pp/:key", async (request: FastifyRequest<{
+    Params: { key: string }
+}>, reply: FastifyReply) => {
+    const key = request.params.key;
+    const projectData = projects[key];
+
+    if (projectData) {
+        return projectData;
+    } else {
+        reply.status(404).send({error: "Project not found"});
+    }
+});
+
+/**
+ * API端点：根据IP地理位置和项目配置决定是否返回项目数据
+ * 这个端点实现了基于区域的访问控制
+ */
+fastify.get("/br/:key", async (request: FastifyRequest<{
+    Params: { key: string }
+}>, reply: FastifyReply) => {
+    // 获取请求的IP地址
+    const xForwardedFor = request.headers["x-forwarded-for"] as string | undefined;
+    const requestIp = xForwardedFor ? xForwardedFor.split(",")[0].trim() : null;
+    const key = request.params.key;
+    const projectData = projects[key];
+
+    // 如果项目不存在，返回空对象
+    if (!projectData) {
+        return {};
     }
 
-    // 无论数据库是否连接，都启动HTTP服务器
-    await fastify.listen({
-      host: '::',
-      port: Number(process.env.PORT) || 3000
-    });
+    // 根据项目配置和请求IP执行区域检查
+    if ("ip" in projectData) {
+        // 情况1: 如果ip字段为空字符串，则不进行地理位置检查
+        if (projectData.ip === "") {
+            if (projectData.code === "2") {
+                return projectData;  // 可见项目
+            } else {
+                return {};  // 隐藏项目
+            }
+        } else {
+            // 情况2: 检查IP是否来自项目指定的国家
+            const accessible = await isAccessibleRegion(requestIp, projectData.ip);
+            if (accessible) {
+                if (projectData.code === "2") {
+                    return projectData;  // 可见项目
+                } else {
+                    return {};  // 隐藏项目
+                }
+            } else {
+                return {};  // 区域不匹配
+            }
+        }
+    } else {
+        // 情况3: 无ip字段，检查是否来自巴西（默认行为）
+        const fromBrazil = await isIPFromBrazil(requestIp);
+        if (fromBrazil) {
+            if (projectData.code === "2") {
+                return projectData;  // 来自巴西且项目可见
+            } else {
+                return {};  // 来自巴西但项目隐藏
+            }
+        } else if (projectData.code === "1") {
+            return {};  // 不是来自巴西且项目隐藏
+        }
+        return {};  // 默认返回空
+    }
+});
 
-    fastify.log.info(`服务已启动在端口 ${process.env.PORT || 3000}`);
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
+/**
+ * API端点：更新项目数据
+ */
+fastify.post("/p/update/:key", async (request: FastifyRequest<{
+    Params: { key: string },
+    Body: ProjectData
+}>, reply: FastifyReply) => {
+    const data = request.body;
+    const key = request.params.key;
+
+    // 首先更新内存缓存
+    projects[key] = data;
+
+    // 然后尝试保存到MongoDB
+    const success = await saveProject(key, data);
+    if (!success) {
+        fastify.log.warn(`项目 ${key} 已存储在内存中，但未能保存到MongoDB`);
+    }
+
+    // 无论MongoDB保存是否成功，都返回成功响应
+    // 这确保了即使MongoDB暂时不可用，API仍能正常工作
+    return reply.status(200).send("{}");
+});
+
+/**
+ * API端点：健康检查
+ * 返回应用和MongoDB连接状态
+ */
+fastify.get('/health', async () => {
+    let dbStatus = 'disconnected';
+
+    if (mongoClient && projectsCollection) {
+        try {
+            // 从MongoDB获取一个随机文档来验证连接
+            const result = await projectsCollection.aggregate([{$sample: {size: 1}}]).toArray();
+            dbStatus = result.length > 0 ? 'connected' : 'empty';
+        } catch (error) {
+            dbStatus = 'error';
+        }
+    }
+
+    return {
+        status: 'ok',
+        mongodb: dbStatus,
+        projectCount: Object.keys(projects).length,
+        timestamp: new Date().toISOString()
+    };
+});
+
+/**
+ * 启动服务器
+ * 连接MongoDB并启动HTTP服务
+ */
+const start = async () => {
+    try {
+        // 尝试连接数据库，但即使失败也继续启动服务器
+        const connected = await connectToMongoDB();
+        if (!connected) {
+            fastify.log.warn('MongoDB连接失败，服务将继续以有限功能运行');
+        }
+
+        // 启动HTTP服务器
+        await fastify.listen({
+            host: '::',  // 同时支持IPv4和IPv6
+            port: Number(process.env.PORT) || 3000
+        });
+
+        fastify.log.info(`服务已启动在端口 ${process.env.PORT || 3000}`);
+    } catch (err) {
+        fastify.log.error(err);
+        process.exit(1);
+    }
 };
 
-// 处理Promise，修复"Promise returned from start is ignored"警告
+// 处理start()返回的Promise
 start().catch(err => {
-  fastify.log.error('启动失败:', err);
-  process.exit(1);
+    fastify.log.error('启动失败:', err);
+    process.exit(1);
 });
 
-// 优雅退出
+/**
+ * 优雅退出处理
+ * 当收到SIGINT或SIGTERM信号时，关闭服务器和数据库连接
+ */
 process.on('SIGINT', async () => {
-  await fastify.close();
-  if (mongoClient) await mongoClient.close();
-  process.exit(0);
+    fastify.log.info('收到SIGINT信号，正在关闭服务...');
+    await fastify.close();
+    if (mongoClient) await mongoClient.close();
+    process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  await fastify.close();
-  if (mongoClient) await mongoClient.close();
-  process.exit(0);
+    fastify.log.info('收到SIGTERM信号，正在关闭服务...');
+    await fastify.close();
+    if (mongoClient) await mongoClient.close();
+    process.exit(0);
 });
 
+// 导出fastify实例，用于测试
 export default fastify;

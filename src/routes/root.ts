@@ -4,7 +4,7 @@ const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.get('/', async (request, reply) => {
 
     const response = {
-      message: 'Welcome to Fastify Hello World API on Railway',
+      message: '',
       timestamp: new Date().toISOString(),
     };
 
