@@ -33,65 +33,38 @@ interface Projects {
   [key: string]: ProjectData;
 }
 
-// MongoDB配置 - 使用正确的配置
-const dbName = 'projectsDB';  // 或考虑使用 'test' 或 'admin'
-const collectionName = 'projects';
+// MongoDB配置
 let mongoClient: MongoClient | null = null;
 let projectsCollection: Collection | null = null;
 
 // 缓存的项目数据
 let projects: Projects = {};
 
-// 从Railway环境变量获取MongoDB连接URL - 优先使用内部连接
-function getMongoConnectionUrl(): string {
-  // 直接使用MONGO_URL如果可用
-  if (process.env.MONGO_URL) {
-    fastify.log.info('使用MONGO_URL环境变量连接');
-    return process.env.MONGO_URL;
-  }
-
-  // 否则构建连接URL
-  const host = process.env.MONGOHOST || 'mongodb.railway.internal';
-  const port = process.env.MONGOPORT || '27017';
-  const user = process.env.MONGOUSER || 'mongo';
-  const password = process.env.MONGOPASSWORD;
-
-  if (host && port && user && password) {
-    // 构建安全的内部连接URL，并添加authSource=admin
-    return `mongodb://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/?authSource=admin`;
-  }
-
-  throw new Error('无法获取有效的MongoDB连接信息');
-}
-
-// 初始化MongoDB连接
-async function initMongoDB() {
+// 连接到MongoDB并加载数据
+async function connectToMongoDB() {
   try {
-    const url = getMongoConnectionUrl();
-    fastify.log.info(`正在连接到MongoDB... (敏感信息已隐藏)`);
+    // 尝试使用MONGO_URL (完整URI)
+    let uri = process.env.MONGO_URL;
 
-    mongoClient = new MongoClient(url, {
-      connectTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-      serverSelectionTimeoutMS: 15000,
-    });
+    // 如果没有完整URI，则从组件构建
+    if (!uri) {
+      const user = process.env.MONGOUSER || 'mongo';
+      const password = process.env.MONGOPASSWORD;
+      const host = process.env.MONGOHOST || 'mongodb.railway.internal';
+      const port = process.env.MONGOPORT || '27017';
 
+      uri = `mongodb://${user}:${password}@${host}:${port}/?authSource=admin`;
+    }
+
+    fastify.log.info('正在连接MongoDB...');
+    mongoClient = new MongoClient(uri);
     await mongoClient.connect();
 
-    fastify.log.info('MongoDB基础连接成功，正在选择数据库...');
+    // 设置集合
+    const db = mongoClient.db('projectsDB'); // 您可以考虑使用环境变量来配置
+    projectsCollection = db.collection('projects');
 
-    // 尝试列出可用的数据库 - 这有助于调试
-    const adminDb = mongoClient.db('admin');
-    const dbs = await adminDb.admin().listDatabases();
-    fastify.log.info('可用的数据库:', dbs.databases.map(db => db.name).join(', '));
-
-    // 使用数据库
-    const db = mongoClient.db(dbName);
-    projectsCollection = db.collection(collectionName);
-
-    // 测试连接
-    await db.command({ ping: 1 });
-    fastify.log.info(`MongoDB连接成功，使用数据库: ${dbName}`);
+    fastify.log.info('MongoDB连接成功，正在加载数据...');
 
     // 加载项目数据
     const documents = await projectsCollection.find({}).toArray();
@@ -106,27 +79,16 @@ async function initMongoDB() {
     fastify.log.info(`已加载 ${Object.keys(projects).length} 个项目`);
     return true;
   } catch (error) {
-    // 更详细的错误日志
-    fastify.log.error('MongoDB连接或数据加载失败:', error);
-
-    if (error instanceof Error) {
-      fastify.log.error(`错误类型: ${error.name}, 消息: ${error.message}`);
-      if (error.stack) {
-        fastify.log.error(`堆栈: ${error.stack}`);
-      }
-    }
-
-    // 不要立即退出，而是将MongoDB标记为不可用
-    fastify.log.warn('MongoDB不可用，应用将以有限功能继续运行');
-    return false; // 返回false而不是退出
+    fastify.log.error('MongoDB连接失败:', error);
+    return false;
   }
 }
 
-// 保存项目到MongoDB - 添加更多错误处理
+// 保存项目
 async function saveProject(packageName: string, data: ProjectData) {
   try {
     if (!projectsCollection) {
-      fastify.log.warn('MongoDB集合未初始化，无法保存项目');
+      fastify.log.warn('MongoDB未连接，无法保存项目');
       return false;
     }
 
@@ -136,10 +98,9 @@ async function saveProject(packageName: string, data: ProjectData) {
         { upsert: true }
     );
 
-    fastify.log.info(`项目 ${packageName} 已保存`);
     return true;
   } catch (error) {
-    fastify.log.error(`保存项目失败 (${packageName}):`, error);
+    fastify.log.error(`保存项目失败:`, error);
     return false;
   }
 }
@@ -151,16 +112,15 @@ async function isIPFromBrazil(ip: string | null): Promise<boolean> {
   try {
     const response = await axios.get(
         `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
-        { timeout: 5000 } // 添加超时
+        { timeout: 5000 }
     );
 
     if (response.data && response.data.countryCode) {
-      fastify.log.debug(`IP ${ip} 的国家代码: ${response.data.countryCode}`);
       return response.data.countryCode === "BR";
     }
     return false;
   } catch (error) {
-    fastify.log.error(`检查IP地理位置失败 (${ip}):`, error);
+    fastify.log.error(`检查IP地理位置失败:`, error);
     return false;
   }
 }
@@ -171,16 +131,15 @@ async function isAccessibleRegion(ip: string | null, countryCode?: string): Prom
   try {
     const response = await axios.get(
         `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
-        { timeout: 5000 } // 添加超时
+        { timeout: 5000 }
     );
 
     if (response.data && response.data.countryCode) {
-      fastify.log.debug(`IP ${ip} 的国家代码: ${response.data.countryCode}`);
       return response.data.countryCode === countryCode;
     }
     return false;
   } catch (error) {
-    fastify.log.error(`检查IP地理位置失败 (${ip}):`, error);
+    fastify.log.error(`检查IP地理位置失败:`, error);
     return false;
   }
 }
@@ -241,7 +200,6 @@ fastify.get("/br/:key", async (request: FastifyRequest<{
     }
   } else {
     // 没有 IP 字段时，检查巴西 IP
-    fastify.log.info("没有 IP 字段时，检查巴西 IP");
     const fromBrazil = await isIPFromBrazil(requestIp);
     if (fromBrazil) {
       if (projectData && projectData.code === "2") {
@@ -267,93 +225,73 @@ fastify.post("/p/update/:key", async (request: FastifyRequest<{
   // 更新内存缓存
   projects[key] = data;
 
-  // 保存到MongoDB
-  const success = await saveProject(key, data);
+  // 保存到MongoDB - 修复了TS6133错误
+  await saveProject(key, data);  // 移除了未使用的success变量
 
-  if (success) {
-    return reply.status(200).send("{}");
-  } else {
-    // 即使MongoDB保存失败，仍然返回成功，因为内存缓存已更新
-    fastify.log.warn(`项目 ${key} 已存储在内存中，但未能保存到MongoDB`);
-    return reply.status(200).send("{}");
-  }
+  // 即使MongoDB保存失败，我们也返回成功
+  return reply.status(200).send("{}");
 });
 
-// 添加更详细的健康检查端点
+// 健康检查
 fastify.get('/health', async () => {
-  let dbStatus = 'not_connected';
-  let dbVersion = null;
+  let dbStatus = 'disconnected';
 
-  if (mongoClient) {
+  if (mongoClient && projectsCollection) {
     try {
-      const adminDb = mongoClient.db('admin');
-      const serverInfo = await adminDb.command({ buildInfo: 1 });
-      dbStatus = 'connected';
-      dbVersion = serverInfo.version;
+      // 获取随机文档
+      const result = await projectsCollection.aggregate([{ $sample: { size: 1 } }]).toArray();
+      dbStatus = result.length > 0 ? 'connected' : 'empty';
     } catch (error) {
       dbStatus = 'error';
-      fastify.log.error('健康检查期间MongoDB连接失败:', error);
     }
   }
 
   return {
     status: 'ok',
-    mongo: {
-      status: dbStatus,
-      version: dbVersion,
-      host: process.env.MONGOHOST || 'unknown',
-      database: dbName
-    },
-    projects: Object.keys(projects).length
+    mongodb: dbStatus,
+    projectCount: Object.keys(projects).length
   };
 });
 
-// 启动服务器前初始化MongoDB
+// 启动服务器
 const start = async () => {
   try {
-    // 连接MongoDB并加载数据，但不在失败时终止
-    const mongoConnected = await initMongoDB();
-
-    if (!mongoConnected) {
-      fastify.log.warn('MongoDB连接失败，应用将以有限功能运行');
+    // 尝试连接数据库，但不阻止服务器启动
+    const connected = await connectToMongoDB();
+    if (!connected) {
+      fastify.log.warn('MongoDB连接失败，服务将继续以有限功能运行');
     }
 
-    // 无论MongoDB是否连接成功，都启动HTTP服务器
+    // 无论数据库是否连接，都启动HTTP服务器
     await fastify.listen({
       host: '::',
       port: Number(process.env.PORT) || 3000
     });
 
-    fastify.log.info(`服务器已启动，监听端口: ${process.env.PORT || 3000}`);
+    fastify.log.info(`服务已启动在端口 ${process.env.PORT || 3000}`);
   } catch (err) {
-    fastify.log.error('启动服务器失败:', err);
+    fastify.log.error(err);
     process.exit(1);
   }
 };
 
-// 启动应用
-start();
+// 处理Promise，修复"Promise returned from start is ignored"警告
+start().catch(err => {
+  fastify.log.error('启动失败:', err);
+  process.exit(1);
+});
 
 // 优雅退出
 process.on('SIGINT', async () => {
-  fastify.log.info('收到SIGINT信号，正在关闭...');
   await fastify.close();
-  if (mongoClient) {
-    await mongoClient.close();
-    fastify.log.info('MongoDB连接已关闭');
-  }
+  if (mongoClient) await mongoClient.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  fastify.log.info('收到SIGTERM信号，正在关闭...');
   await fastify.close();
-  if (mongoClient) {
-    await mongoClient.close();
-    fastify.log.info('MongoDB连接已关闭');
-  }
+  if (mongoClient) await mongoClient.close();
   process.exit(0);
 });
 
-// 导出，以便在测试中使用
 export default fastify;
