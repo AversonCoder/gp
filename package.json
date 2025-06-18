@@ -1,6 +1,6 @@
 {
   "name": "railway-fastify",
-  "version": "1.0.0",
+  "version": "1.0.0.1",
   "main": "app.ts",
   "scripts": {
     "start": "node dist/app.js",
