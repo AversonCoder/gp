@@ -119,29 +119,32 @@ async function getProject(packageName: string): Promise<ProjectData | null> {
 
 /**
  * 获取所有项目数据
- * @returns {Promise<Record<string, ProjectData>>} 所有项目数据，以packageName为键
+ * @returns {Promise<Array<ProjectData & {key: string}>>} 所有项目数据的数组，每个项目包含key字段
  */
-async function getAllProjects(): Promise<Record<string, ProjectData>> {
+async function getAllProjects(): Promise<Array<ProjectData & { key: string }>> {
     try {
         if (!projectsCollection) {
             fastify.log.warn('MongoDB未连接，无法获取项目');
-            return {};
+            return [];
         }
 
         const documents = await projectsCollection.find({}).toArray();
-        const projects: Record<string, ProjectData> = {};
+        const projects: Array<ProjectData & { key: string }> = [];
 
         documents.forEach(doc => {
             const {packageName, _id, ...projectData} = doc;
             if (packageName) {
-                projects[packageName] = projectData;
+                projects.push({
+                    key: packageName,
+                    ...projectData
+                });
             }
         });
 
         return projects;
     } catch (error) {
         fastify.log.error(`获取所有项目失败:`, error);
-        return {};
+        return [];
     }
 }
 
