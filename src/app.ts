@@ -119,9 +119,9 @@ async function getProject(packageName: string): Promise<ProjectData | null> {
 
 /**
  * 获取所有项目数据
- * @returns {Promise<Array<ProjectData & {key: string}>>} 所有项目数据的数组，每个项目包含key字段
+ * @returns {Promise<Array<{[key: string]: ProjectData}>>} 所有项目数据，每个元素是包含单个键值对的对象
  */
-async function getAllProjects(): Promise<Array<ProjectData & { key: string }>> {
+async function getAllProjects(): Promise<Array<{[key: string]: ProjectData}>> {
     try {
         if (!projectsCollection) {
             fastify.log.warn('MongoDB未连接，无法获取项目');
@@ -129,15 +129,15 @@ async function getAllProjects(): Promise<Array<ProjectData & { key: string }>> {
         }
 
         const documents = await projectsCollection.find({}).toArray();
-        const projects: Array<ProjectData & { key: string }> = [];
+        const projects: Array<{[key: string]: ProjectData}> = [];
 
         documents.forEach(doc => {
             const {packageName, _id, ...projectData} = doc;
             if (packageName) {
-                projects.push({
-                    key: packageName,
-                    ...projectData
-                });
+                // 创建一个对象，其中键是packageName，值是项目数据
+                const projectEntry: {[key: string]: ProjectData} = {};
+                projectEntry[packageName] = projectData;
+                projects.push(projectEntry);
             }
         });
 
