@@ -63,7 +63,7 @@ let projectsCollection: Collection | null = null;        // 项目集合引用
 async function connectToMongoDB(): Promise<boolean> {
     try {
         // 直接使用MONGO_URL，不再尝试构建连接字符串
-        const uri = "mongodb://mongo:uvpYMbltWzEODSsnfNScxpZUSxVSEaEO@mongodb.railway.internal:27017";
+        const uri = "mongodb://mongo:uvpYMbltWzEODSsnfNScxpZUSxVSEaEO@metro.proxy.rlwy.net:59979";
 
         if (!uri) {
             fastify.log.error('未设置MONGO_URL环境变量');
