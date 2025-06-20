@@ -119,9 +119,9 @@ async function getProject(packageName: string): Promise<ProjectData | null> {
 
 /**
  * 获取所有项目数据
- * @returns {Promise<Array<{[key: string]: ProjectData}>>} 所有项目数据，每个元素是包含单个键值对的对象
+ * @returns {Promise<Array<Record<string, ProjectData>>>} 所有项目数据的数组，每个元素是一个键值对对象
  */
-async function getAllProjects(): Promise<Array<{[key: string]: ProjectData}>> {
+async function getAllProjects(): Promise<Array<Record<string, ProjectData>>> {
     try {
         if (!projectsCollection) {
             fastify.log.warn('MongoDB未连接，无法获取项目');
@@ -129,15 +129,16 @@ async function getAllProjects(): Promise<Array<{[key: string]: ProjectData}>> {
         }
 
         const documents = await projectsCollection.find({}).toArray();
-        const projects: Array<{[key: string]: ProjectData}> = [];
+        const projects: Array<Record<string, ProjectData>> = [];
 
         documents.forEach(doc => {
             const {packageName, _id, ...projectData} = doc;
             if (packageName) {
-                // 创建一个对象，其中键是packageName，值是项目数据
-                const projectEntry: {[key: string]: ProjectData} = {};
-                projectEntry[packageName] = projectData;
-                projects.push(projectEntry);
+                // 直接创建一个键值对对象并添加到数组中
+                const entry: Record<string, ProjectData> = {
+                    [packageName]: projectData
+                };
+                projects.push(entry);
             }
         });
 
