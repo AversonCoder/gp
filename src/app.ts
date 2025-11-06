@@ -7,6 +7,7 @@ import Fastify, {FastifyReply, FastifyRequest} from 'fastify';
 import AutoLoad, {AutoloadPluginOptions} from '@fastify/autoload';
 import path from 'path';
 import axios from "axios";
+import fastifyStatic from '@fastify/static';
 import {Collection, MongoClient} from 'mongodb';
 
 /**
@@ -27,6 +28,11 @@ const pluginOptions: Partial<AutoloadPluginOptions> = {}
 fastify.register(AutoLoad, {
     dir: path.join(__dirname, 'plugins'),
     options: pluginOptions
+});
+
+fastify.register(fastifyStatic, {
+    root: path.join(__dirname, "public"),
+    prefix: "/public/",
 });
 
 /**
