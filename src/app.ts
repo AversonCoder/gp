@@ -30,9 +30,15 @@ fastify.register(AutoLoad, {
     options: pluginOptions
 });
 
+// 注册静态文件插件
 fastify.register(fastifyStatic, {
     root: path.join(__dirname, "public"),
     prefix: "/public/",
+});
+
+// 添加根路由重定向 - 直接在这里定义，确保优先级高于自动加载的路由
+fastify.get('/', async (request, reply) => {
+    return reply.redirect('/public/index.html');
 });
 
 /**
