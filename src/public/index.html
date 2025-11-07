@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>欢迎页面</title>
+    <title>NovaexAI - 区域限制</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -27,6 +27,11 @@
             text-align: center;
         }
 
+        .logo {
+            width: 180px;
+            margin-bottom: 30px;
+        }
+
         h1 {
             color: #2c3e50;
             margin-bottom: 20px;
@@ -35,6 +40,21 @@
         p {
             font-size: 18px;
             margin-bottom: 30px;
+        }
+
+        .telegram-link {
+            display: inline-block;
+            background-color: #0088cc;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+
+        .telegram-link:hover {
+            background-color: #006699;
         }
 
         .timestamp {
@@ -46,10 +66,12 @@
 </head>
 <body>
 <div class="container">
-    <h1>欢迎访问我们的网站！</h1>
-    <p>这是一个基于 Fastify 构建的 Node.js 应用程序。</p>
-    <p>您现在看到的是我们的欢迎页面。</p>
-    <div class="timestamp" id="timestamp">页面加载时间：</div>
+    <img src="/public/nex.png" alt="NovaexAI Logo" class="logo">
+    <h1>NovaexAI</h1>
+    <p>很抱歉，该地区暂不支持访问我们的服务。</p>
+    <p>如需帮助，请联系我们的客服团队。</p>
+    <a href="https://t.me/NovaexAI" class="telegram-link" target="_blank">通过 Telegram 联系客服</a>
+    <div class="timestamp" id="timestamp">访问时间：</div>
 </div>
 
 <script>
