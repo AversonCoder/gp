@@ -36,11 +36,6 @@ fastify.register(fastifyStatic, {
     prefix: "/public/",
 });
 
-// 添加根路由重定向 - 直接在这里定义，确保优先级高于自动加载的路由
-fastify.get('/', async (request, reply) => {
-    return reply.redirect('/public/index.html');
-});
-
 /**
  * 注册routes目录下的所有路由
  */
