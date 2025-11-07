@@ -30,10 +30,20 @@ fastify.register(AutoLoad, {
     options: pluginOptions
 });
 
-// 注册静态文件插件
+// 注册静态文件插件 - 调整路径以适应生产环境
+// 首先尝试从dist/public目录提供文件（生产环境）
+// 如果该目录不存在，则尝试从src/public目录提供文件（开发环境）
+let staticRoot = path.join(__dirname, "public");
+if (!require('fs').existsSync(staticRoot)) {
+    // 如果dist/public不存在，尝试使用src/public
+    staticRoot = path.join(process.cwd(), "src", "public");
+    fastify.log.info(`静态文件目录 ${staticRoot} 将被使用`);
+}
+
 fastify.register(fastifyStatic, {
-    root: path.join(__dirname, "public"),
+    root: staticRoot,
     prefix: "/public/",
+    decorateReply: false // 避免与其他静态文件插件冲突
 });
 
 /**

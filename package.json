@@ -4,7 +4,8 @@
   "main": "app.ts",
   "scripts": {
     "start": "node dist/app.js",
-    "build": "tsc",
+    "build": "tsc && npm run copy-static",
+    "copy-static": "cp -r src/public dist/",
     "dev": "nodemon --watch src src/app.ts"
   },
   "keywords": [],
