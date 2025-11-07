@@ -2,13 +2,8 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 
 const root: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.get('/', async (request, reply) => {
-
-    const response = {
-      message: '',
-      timestamp: new Date().toISOString(),
-    };
-
-    return response;
+    // 重定向到欢迎页面
+    return reply.redirect('/public/index.html');
   });
 };
 

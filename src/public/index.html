@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>欢迎页面</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            padding: 40px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+
+        p {
+            font-size: 18px;
+            margin-bottom: 30px;
+        }
+
+        .timestamp {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>欢迎访问我们的网站！</h1>
+    <p>这是一个基于 Fastify 构建的 Node.js 应用程序。</p>
+    <p>您现在看到的是我们的欢迎页面。</p>
+    <div class="timestamp" id="timestamp">页面加载时间：</div>
+</div>
+
+<script>
+  // 显示当前时间
+  document.getElementById('timestamp').textContent += new Date().toLocaleString();
+</script>
+</body>
+</html>
