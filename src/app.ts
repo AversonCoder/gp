@@ -201,7 +201,7 @@ async function isIPFromBrazil(ip: string | null): Promise<boolean> {
     try {
         // 使用IP-API服务检查IP地理位置
         const response = await axios.get(
-            `https://pro.ip-api.com/json/${ip}?key=Ebxo9R353wjPvHP&lang=zh-CN`,
+            `https://pro.ip-api.com/json/${ip}?key=aku0DsNHqYTtO3x&lang=zh-CN`,
             {timeout: 5000} // 设置超时避免长时间等待
         );
 
