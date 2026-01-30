@@ -331,7 +331,7 @@ fastify.post("/p/update/:key", async (request: FastifyRequest<{
 }>, reply: FastifyReply) => {
     const data = request.body;
     const key = request.params.key;
-
+    fastify.log.warn(`项目 ${key} 请求`);
     // 保存到MongoDB
     const success = await saveProject(key, data);
     if (!success) {
